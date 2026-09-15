@@ -1,0 +1,3 @@
+PyQt5>=5.12
+# Optional, needed only for File -> Open Remote Configuration (SSH):
+paramiko>=2.7

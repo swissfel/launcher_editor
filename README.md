@@ -1,0 +1,228 @@
+# Launcher Config Editor
+
+A GUI editor for [`epics_launcher`](https://gitea.psi.ch/augustin_s/epics_launcher)
+menu configuration files — the JSON files behind the PSI beamline "Launcher"
+button panels (e.g. `/sf/bernina/config/launcher`).
+
+It reads and writes the *exact same* JSON format as the original launcher, so
+anything you edit here shows up unchanged the next time someone opens (or
+reloads) the menu in `epics_launcher` itself. There is no new file format,
+no database, no server — just a friendlier way to edit the same files.
+
+![Main window](docs/screenshots/01-main-window.png)
+
+## Why
+
+Hand-editing these JSON files works, but it's easy to break a comma, lose
+track of which file a submenu points to, or dread reordering ten entries by
+cutting and pasting lines. This tool gives you:
+
+- **Template-based entry creation** — pick "caQtDM screen", "MEDM screen",
+  "Custom shell command", etc. from a menu instead of remembering field names.
+- **Copy / paste between different menu files** — select entries in one
+  menu, switch to another open tab, paste.
+- **Drag and drop reordering** within a menu.
+- **Inline rename** — double-click an entry's label to rename it in place,
+  no dialog required.
+- **One-click submenu management** — "New Submenu…" creates and links a new
+  JSON file for you; deleting a submenu link can also delete the file, and
+  warns you first if other menus still reference it.
+- **Custom command types** — define your own reusable command templates
+  (added to the site's `launcher_mapping` file), on top of the usual
+  `cmd` free-form shell command.
+- Works directly against files on a **remote server over SSH/SFTP** (e.g.
+  `saresb-cons-05`), so you don't need an NFS mount of `/sf` on your laptop.
+
+## Installation
+
+Requires Python 3.8+ and PyQt5 (the same GUI toolkit `epics_launcher` itself
+uses).
+
+```bash
+git clone <this repository>
+cd launcher_editor
+pip install -e .
+```
+
+For editing files over SSH (recommended way to reach `/sf/bernina/config/launcher`
+from a laptop), also install the optional `remote` extra:
+
+```bash
+pip install -e ".[remote]"
+```
+
+This installs a `launcher-editor` command:
+
+```bash
+launcher-editor                      # opens with nothing loaded
+launcher-editor path/to/menu.json    # opens a local file directly
+```
+
+## Quick start
+
+### Editing the real Bernina configuration over SSH
+
+1. Launch `launcher-editor`.
+2. **File → Open Remote Configuration (SSH)…**
+3. Host defaults to `saresb-cons-05`; leave username/password blank to use
+   your normal SSH keys/agent (same as running `ssh saresb-cons-05` from a
+   terminal). Set the path to `/sf/bernina/config/launcher`.
+4. Pick the root file (e.g. `bernina_beamline.json`) from the list.
+
+The editor auto-detects the site's `launcher_mapping` file in the same
+folder and uses it to populate the "Add" template gallery with the real
+custom types (`caqtdm`, `medm`, `pep`, …) used at that beamline.
+
+If your SSH setup needs a jump host, 2FA, or anything else `paramiko`
+doesn't handle smoothly, mount the remote folder locally instead (e.g.
+`sshfs saresb-cons-05:/sf/bernina/config/launcher ~/mnt/launcher`) and use
+**File → Open Local Configuration…** on the mount point — identical result,
+just a different transport.
+
+### Editing a local checkout
+
+**File → Open Local Configuration…** and pick the root `.json` file. Useful
+if you've mounted `/sf` locally, or want to try the tool on a scratch copy
+first (recommended the first time!).
+
+### Creating a brand-new configuration from scratch
+
+**File → New Configuration…**, give it a title and file name. This is how
+you'd start a whole new beamline/area menu tree.
+
+## Everyday tasks
+
+### Add a new entry
+
+Click **Add ▾** in a menu's toolbar and pick a template. Built-in types
+(*Separator*, *Title*, *Custom shell command*) are always available; the
+rest come from the mapping file that's loaded for the current site
+(`caQtDM screen`, `MEDM screen`, `PEP panel`, or any site-specific type).
+
+![Add menu](docs/screenshots/02-add-menu.png)
+
+The new entry is inserted right after the currently selected row (or at the
+end if nothing is selected), and the editor immediately starts an inline
+rename so you can type its label right away.
+
+### Rename an entry
+
+Double-click its label in the list (or select it and press **F2**) and
+type the new text — no dialog, no touching JSON.
+
+![Inline rename](docs/screenshots/07-inline-rename.png)
+
+You can also rename (and edit every other field) from the **properties
+panel** on the right, which shows exactly the fields relevant to that
+entry's type.
+
+### Reorder entries
+
+Drag an entry up or down within its list to reorder it. `Move Up` /
+`Move Down` toolbar buttons (or **Ctrl+↑ / Ctrl+↓**) do the same thing one
+step at a time, handy for precise positioning.
+
+### Copy or move entries between menus
+
+1. Select one or more entries (click, Shift-click, Ctrl-click).
+2. **Copy** (Ctrl+C) or **Cut** (Ctrl+X).
+3. Switch to the destination tab (open it first via double-click on a
+   submenu entry, or the linked file field's **Open →** button).
+4. **Paste** (Ctrl+V) — entries are inserted after the current selection.
+
+Copying also puts the entries on the system clipboard as readable JSON, so
+you can paste into a text editor to inspect them, or paste JSON copied
+elsewhere back into the app.
+
+### Add a new submenu
+
+Click **New Submenu…**, give it a title. The editor:
+
+1. Creates a new, empty JSON file next to the current one (slugified from
+   the title, e.g. "Vacuum System" → `vacuum_system.json`; you can rename
+   the file before confirming).
+2. Adds a `{"type": "menu", ...}` entry linking to it, right where your
+   cursor was.
+3. Offers to open the new submenu immediately so you can start filling it in.
+
+![Submenu tab](docs/screenshots/06-submenu-tab.png)
+
+### Delete a submenu
+
+Select the submenu entry and press **Delete**. You'll be asked whether to
+also delete the underlying JSON file. If any *other* menu file (in the same
+folder) still links to it, the editor warns you before you delete the file
+out from under them.
+
+### Edit menu-level settings
+
+**Menu Settings…** in a tab's toolbar edits the menu title/style, and the
+"view switcher" (`file-choice`) list that lets a beamline offer e.g. an
+"expert" vs. "user" view.
+
+![Menu settings](docs/screenshots/04-menu-settings-dialog.png)
+
+### Password-protect a menu
+
+**Tools → Set/Clear Password…** stores an MD5 hash in the JSON file, the
+same mechanism as the original `epics_launcher-protect` command-line tool.
+
+![Password dialog](docs/screenshots/05-password-dialog.png)
+
+### Define a new reusable custom command type
+
+Most sites only need the built-in types (`cmd`, `caqtdm`, `medm`, `pep`).
+If you need a new *kind* of button across many menus (say, launching an
+in-house diagnostic tool with its own arguments), use **Tools → Add Custom
+Command Type…**. This writes a new entry into the site's `launcher_mapping`
+file — exactly the mechanism described in the
+[epics_launcher mapping documentation](https://gitea.psi.ch/augustin_s/epics_launcher#mapping) —
+and the new type immediately shows up in the **Add** gallery for every open
+menu.
+
+### Saving
+
+**Ctrl+S** saves the current tab, **Ctrl+Shift+S** saves every open tab. A
+`.bak` copy of the previous file content is written alongside it before
+each save. Note: the first time you save a file that was hand-formatted
+compactly (as most existing PSI configs are), the editor reformats it to
+readable, indented JSON — this produces a larger one-time diff, but every
+save after that is a normal, minimal diff.
+
+### Git
+
+If the folder you're editing is a git working copy (as
+`/sf/bernina/config/launcher` is), the **Git** menu offers **Status**,
+**Commit…**, and **Push…** as a convenience — nothing here happens
+automatically; each is an explicit action you trigger, and **Push** always
+asks for confirmation since it affects the shared remote history.
+
+## How this relates to `epics_launcher`
+
+This is a separate, independent tool — it does not modify or replace
+`epics_launcher` itself. It just reads and writes the same configuration
+format described in that project's README (`menu-title`, `file-choice`,
+`menu`, `password`, item `type`s, and the per-OS `mapping` file for custom
+types). Any change you make and save here is picked up the next time
+`epics_launcher` loads or reloads that file — there's no conversion step.
+
+If you want to verify this yourself: every file this editor writes is valid
+input to `epics_launcher.launcher_model.launcher_menu_model`, the original
+project's own parser.
+
+## Development
+
+```bash
+pip install -e ".[dev]"
+pytest
+```
+
+The core data model (`launcher_editor/model.py`, `backends.py`,
+`workspace.py`) has no GUI dependency and is fully unit tested. The GUI
+layer (`launcher_editor/gui/`) is PyQt5 and can be smoke-tested headlessly
+with `QT_QPA_PLATFORM=offscreen`.
+
+## License
+
+GPL-3.0-or-later, matching the license of the upstream `epics_launcher`
+project this tool is designed to work alongside.
