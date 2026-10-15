@@ -36,48 +36,124 @@ cutting and pasting lines. This tool gives you:
 ## Installation
 
 Requires Python 3.8+ and PyQt5 (the same GUI toolkit `epics_launcher` itself
-uses).
+uses). The tool is not on PyPI; pip installs it straight from this repository.
+
+### Quick install (any machine with Python)
 
 ```bash
-git clone <this repository>
-cd launcher_editor
-pip install -e .
+pip install "git+https://github.com/swissfel/launcher_editor"
 ```
 
-For editing files over SSH (recommended way to reach `/sf/bernina/config/launcher`
-from a laptop), also install the optional `remote` extra:
+pip pulls in PyQt5 if it's missing. Add the `remote` extra if you want to
+open files over SSH (see [Viewing a remote configuration over
+SSH](#viewing-a-remote-configuration-over-ssh)):
 
 ```bash
-pip install -e ".[remote]"
+pip install "launcher-editor[remote] @ git+https://github.com/swissfel/launcher_editor"
 ```
 
-This installs a `launcher-editor` command:
+To update later, run the same command with `--upgrade`; to remove it,
+`pip uninstall launcher-editor`.
+
+### On the SwissFEL consoles
+
+The shared Bernina Python environment already has PyQt5 and paramiko, so
+only the editor itself gets installed, into your user site-packages, without
+touching the shared environment:
+
+```bash
+/sf/bernina/applications/python/environments/bpy312/bin/python -m pip install --user \
+    "git+https://github.com/swissfel/launcher_editor"
+```
+
+The consoles each have their own local `$HOME`, so repeat this on every
+console you use.
+
+### Running it
+
+The install adds a `launcher-editor` command:
 
 ```bash
 launcher-editor                      # opens with nothing loaded
-launcher-editor path/to/menu.json    # opens a local file directly
+launcher-editor path/to/menu.json    # opens a menu file directly
 ```
 
-## Quick start
+If `launcher-editor` isn't found (`~/.local/bin` not on your `PATH`), use
+`python -m launcher_editor` with the same Python you installed it into.
 
-### Editing the real Bernina configuration over SSH
+### Development install
 
-1. Launch `launcher-editor`.
-2. **File → Open Remote Configuration (SSH)…**
-3. Host defaults to `saresb-cons-05`; leave username/password blank to use
-   your normal SSH keys/agent (same as running `ssh saresb-cons-05` from a
-   terminal). Set the path to `/sf/bernina/config/launcher`.
-4. Pick the root file (e.g. `bernina_beamline.json`) from the list.
+```bash
+git clone https://github.com/swissfel/launcher_editor
+cd launcher_editor
+pip install -e ".[dev]"
+```
 
-The editor auto-detects the site's `launcher_mapping` file in the same
-folder and uses it to populate the "Add" template gallery with the real
-custom types (`caqtdm`, `medm`, `pep`, …) used at that beamline.
+## Getting started: change your beamline's launcher
 
-If your SSH setup needs a jump host, 2FA, or anything else `paramiko`
-doesn't handle smoothly, mount the remote folder locally instead (e.g.
-`sshfs saresb-cons-05:/sf/bernina/config/launcher ~/mnt/launcher`) and use
-**File → Open Local Configuration…** on the mount point — identical result,
-just a different transport.
+The launcher configuration on the consoles (e.g. `/sf/bernina/config/launcher`)
+is **read-only and auto-deployed** from a git repository: every push to that
+repository's `master` updates the launcher on all consoles. Edits made
+directly in `/sf/.../config/launcher` can't be saved and would be overwritten
+by the next deploy anyway. So the workflow is: clone, edit, commit, push.
+
+1. **Clone the configuration repository** (Bernina shown; other beamlines
+   have their own `autodeploy_config/sf_<beamline>_launcher` repository):
+
+   ```bash
+   git clone git@gitea.psi.ch:autodeploy_config/sf_bernina_launcher.git
+   cd sf_bernina_launcher
+   ```
+
+2. **Open the main menu.** `S_Bernina.json` is the menu the consoles open
+   (`epics_launcher_wrapper` loads `S_<Beamline>.json`):
+
+   ```bash
+   launcher-editor S_Bernina.json
+   ```
+
+   The editor finds the `launcher_mapping` file in the same folder, so the
+   **Add** menu offers the beamline's real entry types (`caqtdm`, `medm`,
+   `pep`, …). Double-click a submenu entry to open its file in a new tab.
+
+3. **Make a change** (e.g. rename an entry with F2, or **Add ▾** a new
+   one) and save with **Ctrl+S** (**Ctrl+Shift+S** saves all tabs).
+
+4. **Check what changed:**
+
+   ```bash
+   git status
+   git diff
+   ```
+
+   Each save leaves a `.bak` copy of the previous version next to the file.
+   Don't commit those: `rm *.bak`, or add `*.bak` to `.git/info/exclude`
+   once. The first save of a compactly formatted file reformats it to
+   indented JSON, so expect one large diff for that file.
+
+5. **Commit and push.**
+
+   ```bash
+   git commit -am "Launcher: add XYZ panel"
+   git push
+   ```
+
+   > **The push goes live.** It deploys to every console. To test first,
+   > run `epics_launcher` on your local copy (e.g.
+   > `epics_launcher S_Bernina.json` on a console). To throw local edits
+   > away instead: `git checkout .`
+
+The **Git** menu in the editor offers the same Status / Commit / Push
+actions; push asks for confirmation.
+
+### Viewing a remote configuration over SSH
+
+**File → Open Remote Configuration (SSH)…** (needs the `remote` extra) opens
+files directly on a host, with your normal SSH keys/agent. On the consoles
+that's useful for *looking* at the deployed configuration, but saving there
+fails (read-only), so make changes in a clone as described above. If SSH
+needs a jump host or 2FA that `paramiko` can't handle, mount the folder with
+`sshfs` and use **File → Open Local Configuration…** instead.
 
 ### Editing a local checkout
 
