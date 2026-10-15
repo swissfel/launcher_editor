@@ -31,13 +31,35 @@ def main(argv=None) -> int:
         nargs="?",
         help="Root menu JSON file to open immediately (local path).",
     )
+    parser.add_argument(
+        "--read-only",
+        action="store_true",
+        help="Open for viewing only: saving, publishing and editing are disabled.",
+    )
+    parser.add_argument(
+        "--preview-command",
+        default="epics_launcher",
+        metavar="CMD",
+        help='Command for Preview; the root menu file is appended (default: "epics_launcher").',
+    )
+    parser.add_argument(
+        "--publish-note",
+        default="",
+        metavar="TEXT",
+        help="Extra text shown in the Publish dialog and after publishing "
+        "(e.g. what happens once the change is pushed).",
+    )
     args = parser.parse_args(argv)
 
     app = QtWidgets.QApplication(sys.argv[:1])
     app.setApplicationName("Launcher Config Editor")
     app.setStyleSheet(_load_stylesheet())
 
-    window = MainWindow()
+    window = MainWindow(
+        read_only=args.read_only,
+        preview_command=args.preview_command,
+        publish_note=args.publish_note,
+    )
     window.show()
 
     if args.configuration:

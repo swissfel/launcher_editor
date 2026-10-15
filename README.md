@@ -78,6 +78,14 @@ launcher-editor                      # opens with nothing loaded
 launcher-editor path/to/menu.json    # opens a menu file directly
 ```
 
+Options:
+
+| Option | Meaning |
+|---|---|
+| `--read-only` | View only: saving, editing and publishing are disabled. Useful for looking at a deployed configuration. |
+| `--preview-command CMD` | What **Preview** runs; the root menu file is appended. Default `epics_launcher`. Use the same options your consoles use, e.g. `"epics_launcher --position 80 -120"`. |
+| `--publish-note TEXT` | Extra text shown in the Publish dialog and after publishing, e.g. how long the deploy takes. |
+
 If `launcher-editor` isn't found (`~/.local/bin` not on your `PATH`), use
 `python -m launcher_editor` with the same Python you installed it into.
 
@@ -119,32 +127,29 @@ by the next deploy anyway. So the workflow is: clone, edit, commit, push.
 3. **Make a change** (e.g. rename an entry with F2, or **Add ▾** a new
    one) and save with **Ctrl+S** (**Ctrl+Shift+S** saves all tabs).
 
-4. **Check what changed:**
+4. **Try it: Preview (F5).** This opens your copy in the real
+   `epics_launcher`, exactly as the consoles would show it. While the
+   preview is open, it restarts by itself every time you save, so you see
+   each change right away. Nothing is deployed yet.
 
-   ```bash
-   git status
-   git diff
-   ```
+5. **Make it live: Publish… (Ctrl+Shift+P).** The dialog lists the
+   changed files and the full diff. Type a few words about what you
+   changed and press **Publish**. The editor then:
+   - commits your changes, without the `.bak` backups the editor writes on
+     each save (they're added to the clone's local `.git/info/exclude`),
+   - fetches what others pushed in the meantime and puts your commit on
+     top (rebase, no merge commits),
+   - pushes, which deploys it to every console.
 
-   Each save leaves a `.bak` copy of the previous version next to the file.
-   Don't commit those: `rm *.bak`, or add `*.bak` to `.git/info/exclude`
-   once. The first save of a compactly formatted file reformats it to
-   indented JSON, so expect one large diff for that file.
+   If someone else changed the same lines, nothing is published: the
+   rebase is undone, your change stays as a local commit, and the message
+   tells you how to sort it out with git. **Git → Update from Remote**
+   brings your copy up to date (fast-forward only) without publishing.
 
-5. **Commit and push.**
+   The first save of a compactly formatted file reformats it to indented
+   JSON, so expect one large diff for that file.
 
-   ```bash
-   git commit -am "Launcher: add XYZ panel"
-   git push
-   ```
-
-   > **The push goes live.** It deploys to every console. To test first,
-   > run `epics_launcher` on your local copy (e.g.
-   > `epics_launcher S_Bernina.json` on a console). To throw local edits
-   > away instead: `git checkout .`
-
-The **Git** menu in the editor offers the same Status / Commit / Push
-actions; push asks for confirmation.
+To throw away local edits instead: `git checkout .` in the clone.
 
 ### Viewing a remote configuration over SSH
 
@@ -265,13 +270,22 @@ compactly (as most existing PSI configs are), the editor reformats it to
 readable, indented JSON — this produces a larger one-time diff, but every
 save after that is a normal, minimal diff.
 
+### Preview
+
+**File → Preview** (F5, or the toolbar button) starts the preview command
+(default `epics_launcher`) on the root menu file of the configuration you
+opened. As long as that window is open, every save restarts it, since
+`epics_launcher` itself can't reload a menu. It only works for local files.
+
 ### Git
 
-If the folder you're editing is a git working copy (as
-`/sf/bernina/config/launcher` is), the **Git** menu offers **Status**,
-**Commit…**, and **Push…** as a convenience — nothing here happens
-automatically; each is an explicit action you trigger, and **Push** always
-asks for confirmation since it affects the shared remote history.
+If the file you're editing is inside a git working copy, the **Git** menu
+offers **Update from Remote** (`git pull --ff-only`), **Publish…** (see
+[Getting started](#getting-started-change-your-beamlines-launcher)), and the
+single steps **Status**, **Commit…** and **Push…**. Nothing happens
+automatically; each is an explicit action. Git never prompts for a
+password here: if your SSH key or credentials aren't available, the step
+fails with git's message instead of hanging.
 
 ## How this relates to `epics_launcher`
 

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import copy
+import shlex
 from typing import Optional
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 
+from .. import gitflow
 from ..backends import Backend, BackendError, LocalBackend, RemoteConnectionInfo, SFTPBackend
 from ..model import DEFAULT_MAPPING, MappingFile, MenuDocument, slugify
 from ..workspace import Workspace
@@ -14,6 +16,7 @@ from . import icons
 from .dialogs import (
     NewCustomTypeDialog,
     PasswordDialog,
+    PublishDialog,
     RemoteConnectDialog,
     confirm,
     show_about,
@@ -27,10 +30,21 @@ MAPPING_CANDIDATE_NAMES = ("launcher_mapping", "launcher_mapping_rhel7", "mappin
 
 
 class MainWindow(QtWidgets.QMainWindow):
-    def __init__(self):
+    def __init__(self, read_only: bool = False, preview_command: str = "epics_launcher", publish_note: str = ""):
         super().__init__()
         self.setWindowTitle("Launcher Config Editor")
         self.resize(1250, 800)
+
+        self.read_only = read_only
+        self.preview_command = preview_command
+        self.publish_note = publish_note
+        self.root_path: Optional[str] = None
+        self.preview_proc: Optional[QtCore.QProcess] = None
+        # Coalesces the restarts from "Save All" into one.
+        self._preview_restart = QtCore.QTimer(self)
+        self._preview_restart.setSingleShot(True)
+        self._preview_restart.setInterval(300)
+        self._preview_restart.timeout.connect(self._launch_preview)
 
         self.backend: Optional[Backend] = None
         self.workspace: Optional[Workspace] = None
@@ -144,6 +158,19 @@ class MainWindow(QtWidgets.QMainWindow):
         self.act_git_commit.triggered.connect(self.git_commit)
         self.act_git_push = QtWidgets.QAction("Git &Push…", self)
         self.act_git_push.triggered.connect(self.git_push)
+        self.act_git_update = QtWidgets.QAction("&Update from Remote", self)
+        self.act_git_update.triggered.connect(self.git_update)
+        self.act_publish = QtWidgets.QAction("P&ublish…", self)
+        self.act_publish.setShortcut("Ctrl+Shift+P")
+        self.act_publish.setToolTip("Commit your saved changes and push them (Ctrl+Shift+P)")
+        self.act_publish.triggered.connect(self.publish)
+
+        self.act_preview = QtWidgets.QAction("&Preview", self)
+        self.act_preview.setShortcut("F5")
+        self.act_preview.setToolTip(
+            "Open the root menu in the real launcher; it restarts each time you save (F5)"
+        )
+        self.act_preview.triggered.connect(self.start_preview)
 
         self.act_about = QtWidgets.QAction("&About", self)
         self.act_about.triggered.connect(lambda: show_about(self))
@@ -157,6 +184,7 @@ class MainWindow(QtWidgets.QMainWindow):
         m_file.addAction(self.act_save)
         m_file.addAction(self.act_save_all)
         m_file.addAction(self.act_reload)
+        m_file.addAction(self.act_preview)
         m_file.addSeparator()
         m_file.addAction(self.act_close_tab)
         m_file.addSeparator()
@@ -183,6 +211,9 @@ class MainWindow(QtWidgets.QMainWindow):
         m_tools.addAction(self.act_load_mapping)
 
         self.m_git = self.menuBar().addMenu("&Git")
+        self.m_git.addAction(self.act_git_update)
+        self.m_git.addAction(self.act_publish)
+        self.m_git.addSeparator()
         self.m_git.addAction(self.act_git_status)
         self.m_git.addAction(self.act_git_commit)
         self.m_git.addAction(self.act_git_push)
@@ -205,6 +236,9 @@ class MainWindow(QtWidgets.QMainWindow):
         tb.addSeparator()
         self.act_password.setIcon(icons.action_icon("lock"))
         tb.addAction(self.act_password)
+        tb.addSeparator()
+        tb.addAction(self.act_preview)
+        tb.addAction(self.act_publish)
 
     def _restore_geometry(self) -> None:
         geo = self.settings.value("geometry")
@@ -252,6 +286,27 @@ class MainWindow(QtWidgets.QMainWindow):
         self.act_new_config.setEnabled(True)
         self.act_add_custom_type.setEnabled(self.workspace is not None)
         self.act_load_mapping.setEnabled(self.workspace is not None)
+        self.act_preview.setEnabled(self.root_path is not None and isinstance(self.backend, LocalBackend))
+        self.act_publish.setEnabled(has_tab)
+        if self.read_only:
+            for act in (
+                self.act_save,
+                self.act_save_all,
+                self.act_new_config,
+                self.act_cut,
+                self.act_paste,
+                self.act_duplicate,
+                self.act_delete,
+                self.act_rename,
+                self.act_new_submenu,
+                self.act_move_up,
+                self.act_move_down,
+                self.act_menu_settings,
+                self.act_password,
+                self.act_add_custom_type,
+                self.act_publish,
+            ):
+                act.setEnabled(False)
 
     def _tab_label(self, doc: MenuDocument) -> str:
         base = self.backend.basename(doc.path) if self.backend else doc.path
@@ -265,11 +320,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _update_window_title(self) -> None:
         ed = self.current_editor()
+        suffix = " [read-only]" if self.read_only else ""
         if ed is None or self.backend is None:
-            self.setWindowTitle("Launcher Config Editor")
+            self.setWindowTitle("Launcher Config Editor" + suffix)
             self.backend_label.setText("No configuration open")
         else:
-            self.setWindowTitle(f"Launcher Config Editor — {ed.doc.path}")
+            self.setWindowTitle(f"Launcher Config Editor — {ed.doc.path}{suffix}")
             self.backend_label.setText(f"Backend: {self.backend.label}")
 
     # -- opening configurations -------------------------------------------
@@ -284,8 +340,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._switch_backend_and_open(LocalBackend(), path)
 
     def open_remote_root(self) -> None:
-        default_host = self.settings.value("last_remote_host", "saresb-cons-05")
-        default_path = self.settings.value("last_remote_path", "/sf/bernina/config/launcher")
+        default_host = self.settings.value("last_remote_host", "")
+        default_path = self.settings.value("last_remote_path", "")
         dlg = RemoteConnectDialog(self, default_host=default_host, default_path=default_path)
         if dlg.exec_() != QtWidgets.QDialog.Accepted:
             return
@@ -342,7 +398,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 return
             self.backend.close()
 
+        self._stop_preview()
         self.backend = backend
+        self.root_path = path
         self.workspace = Workspace(backend)
         self._auto_load_mapping(backend, backend.dirname(path))
         self._open_path_in_tab(path)
@@ -449,6 +507,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._save_editor(ed)
 
     def _save_editor(self, ed: MenuEditorWidget) -> bool:
+        if self.read_only:
+            QtWidgets.QMessageBox.information(self, "Save", "This configuration is open read-only.")
+            return False
         problems = ed.doc.validate()
         if problems:
             preview = "\n".join(problems[:6]) + ("\n…" if len(problems) > 6 else "")
@@ -461,6 +522,8 @@ class MainWindow(QtWidgets.QMainWindow):
             return False
         self._update_tab_title(ed)
         self.status.showMessage(f"Saved {ed.doc.path}", 4000)
+        if self._preview_running():
+            self._preview_restart.start()
         return True
 
     def save_all(self) -> None:
@@ -493,7 +556,7 @@ class MainWindow(QtWidgets.QMainWindow):
         ed = self.tabs.widget(index)
         if ed is None:
             return
-        if ed.is_dirty:
+        if ed.is_dirty and not self.read_only:
             ret = QtWidgets.QMessageBox.question(
                 self,
                 "Unsaved Changes",
@@ -512,7 +575,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _confirm_and_close_all_tabs(self) -> bool:
         dirty = [self.tabs.widget(i) for i in range(self.tabs.count()) if self.tabs.widget(i).is_dirty]
-        if dirty:
+        if dirty and not self.read_only:
             ret = QtWidgets.QMessageBox.question(
                 self,
                 "Unsaved Changes",
@@ -532,6 +595,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self._confirm_and_close_all_tabs():
             event.ignore()
             return
+        self._stop_preview()
         if self.backend is not None:
             self.backend.close()
         self.settings.setValue("geometry", self.saveGeometry())
@@ -593,15 +657,15 @@ class MainWindow(QtWidgets.QMainWindow):
         ed = self.current_editor()
         if ed is None or self.backend is None:
             return None
-        directory = self.backend.dirname(ed.doc.path)
-        if self.backend.exists(self.backend.join(directory, ".git")):
-            return directory
-        return None
+        return gitflow.repo_root(self.backend, self.backend.dirname(ed.doc.path))
 
     def _update_git_enabled(self) -> None:
         enabled = self._git_directory() is not None
-        for act in (self.act_git_status, self.act_git_commit, self.act_git_push):
+        for act in (self.act_git_status, self.act_git_commit, self.act_git_push, self.act_git_update, self.act_publish):
             act.setEnabled(enabled)
+        if self.read_only:
+            for act in (self.act_git_commit, self.act_git_push, self.act_git_update, self.act_publish):
+                act.setEnabled(False)
 
     def git_status(self) -> None:
         directory = self._git_directory()
@@ -647,3 +711,127 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(self, "Git Push", str(exc))
             return
         QtWidgets.QMessageBox.information(self, "Git Push", out.strip() or "Pushed.")
+
+    # -- update / publish -------------------------------------------------
+    def _save_all_first(self, title: str) -> bool:
+        dirty = [self.tabs.widget(i) for i in range(self.tabs.count()) if self.tabs.widget(i).is_dirty]
+        if not dirty:
+            return True
+        if not confirm(self, title, f"{len(dirty)} file(s) have unsaved changes. Save them first?"):
+            return False
+        return all(self._save_editor(ed) for ed in dirty)
+
+    def _reload_all_from_disk(self) -> None:
+        """Re-read every open tab after git changed the files underneath."""
+        for i in range(self.tabs.count()):
+            ed = self.tabs.widget(i)
+            try:
+                fresh = MenuDocument.load(self.backend, ed.doc.path)
+            except BackendError:
+                continue  # file removed upstream; the tab keeps its last state
+            ed.doc.data = fresh.data
+            ed.doc.dirty = False
+            ed.refresh()
+            self._update_tab_title(ed)
+        if self.root_path:
+            self._auto_load_mapping(self.backend, self.backend.dirname(self.root_path))
+
+    def _run_busy(self, func, *args):
+        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
+        try:
+            return func(*args)
+        finally:
+            QtWidgets.QApplication.restoreOverrideCursor()
+
+    def git_update(self) -> None:
+        root = self._git_directory()
+        if not root or not self._save_all_first("Update from Remote"):
+            return
+        try:
+            out = self._run_busy(gitflow.update, self.backend, root)
+        except (gitflow.PublishError, BackendError) as exc:
+            QtWidgets.QMessageBox.warning(self, "Update from Remote", str(exc))
+            return
+        self._reload_all_from_disk()
+        if self._preview_running():
+            self._preview_restart.start()
+        self.status.showMessage(out.splitlines()[-1] if out else "Updated", 5000)
+
+    def publish(self) -> None:
+        root = self._git_directory()
+        if not root:
+            QtWidgets.QMessageBox.information(
+                self, "Publish", "The open configuration is not inside a git repository, so there is nothing to publish to."
+            )
+            return
+        if not self._save_all_first("Publish"):
+            return
+        try:
+            pending = gitflow.prepare(self.backend, root)
+        except (gitflow.PublishError, BackendError) as exc:
+            QtWidgets.QMessageBox.warning(self, "Publish", str(exc))
+            return
+        if pending.nothing_to_publish:
+            gitflow.unstage(self.backend, root)
+            QtWidgets.QMessageBox.information(self, "Publish", "Nothing to publish: everything is already pushed.")
+            return
+        dlg = PublishDialog(
+            self, root, gitflow.changed_files(pending.status), pending.diff, pending.ahead, self.publish_note
+        )
+        if dlg.exec_() != QtWidgets.QDialog.Accepted:
+            gitflow.unstage(self.backend, root)
+            return
+        try:
+            summary = self._run_busy(gitflow.publish, self.backend, root, dlg.message())
+        except (gitflow.PublishError, BackendError) as exc:
+            QtWidgets.QMessageBox.critical(self, "Publish Failed", str(exc))
+            return
+        self._reload_all_from_disk()  # the rebase may have brought in others' changes
+        if self._preview_running():
+            self._preview_restart.start()
+        QtWidgets.QMessageBox.information(
+            self, "Published", summary + (f"\n\n{self.publish_note}" if self.publish_note else "")
+        )
+
+    # -- preview ------------------------------------------------------------
+    def _preview_running(self) -> bool:
+        return self.preview_proc is not None and self.preview_proc.state() != QtCore.QProcess.NotRunning
+
+    def _stop_preview(self) -> None:
+        self._preview_restart.stop()
+        proc, self.preview_proc = self.preview_proc, None
+        if proc is not None and proc.state() != QtCore.QProcess.NotRunning:
+            proc.terminate()
+            if not proc.waitForFinished(1500):
+                proc.kill()
+                proc.waitForFinished(1000)
+
+    def start_preview(self) -> None:
+        if not self.root_path or not isinstance(self.backend, LocalBackend):
+            return
+        dirty = [self.tabs.widget(i) for i in range(self.tabs.count()) if self.tabs.widget(i).is_dirty]
+        if dirty and not self.read_only and confirm(
+            self, "Preview", "The preview shows the saved files. Save your changes first?"
+        ):
+            for ed in dirty:
+                if not self._save_editor(ed):
+                    return
+        self._launch_preview()
+
+    def _launch_preview(self) -> None:
+        self._stop_preview()
+        try:
+            cmd = shlex.split(self.preview_command) + [self.root_path]
+        except ValueError as exc:
+            QtWidgets.QMessageBox.warning(self, "Preview", f"Invalid preview command: {exc}")
+            return
+        proc = QtCore.QProcess(self)
+        proc.setProcessChannelMode(QtCore.QProcess.ForwardedChannels)
+        proc.errorOccurred.connect(lambda err, c=cmd[0]: self._on_preview_error(err, c))
+        proc.start(cmd[0], cmd[1:])
+        self.preview_proc = proc
+        self.status.showMessage("Preview started; it restarts each time you save", 5000)
+
+    def _on_preview_error(self, error: QtCore.QProcess.ProcessError, program: str) -> None:
+        if error == QtCore.QProcess.FailedToStart:
+            QtWidgets.QMessageBox.warning(self, "Preview", f'Could not start "{program}". Is it installed and on PATH?')

@@ -47,7 +47,7 @@ class Backend:
     def remove(self, path: str) -> None:
         raise NotImplementedError
 
-    def run_git(self, directory: str, args: List[str]) -> str:
+    def run_git(self, directory: str, args: List[str], timeout: int = 30) -> str:
         """Run a git command in ``directory`` and return combined output."""
         raise NotImplementedError
 
@@ -105,16 +105,23 @@ class LocalBackend(Backend):
         except OSError as exc:
             raise BackendError(str(exc)) from exc
 
-    def run_git(self, directory: str, args: List[str]) -> str:
+    def run_git(self, directory: str, args: List[str], timeout: int = 30) -> str:
         import subprocess
 
+        # Never wait for a password prompt nobody can see: fail instead.
+        env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+        env.setdefault("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")
         try:
             result = subprocess.run(
                 ["git", "-C", directory] + args,
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=timeout,
+                env=env,
+                stdin=subprocess.DEVNULL,
             )
+        except subprocess.TimeoutExpired as exc:
+            raise BackendError(f"git {' '.join(args)} timed out after {timeout} s") from exc
         except OSError as exc:
             raise BackendError(str(exc)) from exc
         output = (result.stdout or "") + (result.stderr or "")
@@ -213,11 +220,11 @@ class SFTPBackend(Backend):
         except (OSError, IOError) as exc:
             raise BackendError(f"{path}: {exc}") from exc
 
-    def run_git(self, directory: str, args: List[str]) -> str:
-        cmd = "git -C " + _shell_quote(directory) + " " + " ".join(
+    def run_git(self, directory: str, args: List[str], timeout: int = 30) -> str:
+        cmd = "GIT_TERMINAL_PROMPT=0 git -C " + _shell_quote(directory) + " " + " ".join(
             _shell_quote(a) for a in args
         )
-        stdin, stdout, stderr = self._client.exec_command(cmd, timeout=30)
+        stdin, stdout, stderr = self._client.exec_command(cmd, timeout=timeout)
         out = stdout.read().decode("utf-8", "replace")
         err = stderr.read().decode("utf-8", "replace")
         rc = stdout.channel.recv_exit_status()

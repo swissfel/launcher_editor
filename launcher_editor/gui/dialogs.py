@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional, Tuple
 
-from PyQt5 import QtWidgets
+from PyQt5 import QtCore, QtGui, QtWidgets
 
 from ..model import slugify
 from .. import __version__
@@ -243,7 +243,7 @@ class MenuSettingsDialog(QtWidgets.QDialog):
 class RemoteConnectDialog(QtWidgets.QDialog):
     """Collect SSH/SFTP connection details for remote editing."""
 
-    def __init__(self, parent=None, default_host: str = "saresb-cons-05", default_path: str = "/sf/bernina/config/launcher"):
+    def __init__(self, parent=None, default_host: str = "", default_path: str = ""):
         super().__init__(parent)
         self.setWindowTitle("Open Remote Configuration (SSH)")
         self.setMinimumWidth(460)
@@ -339,6 +339,61 @@ class NewCustomTypeDialog(QtWidgets.QDialog):
                     key, val = pair.split("=", 1)
                     arg_flags[key.strip()] = val.strip()
         return name, command, arg_flags
+
+
+class PublishDialog(QtWidgets.QDialog):
+    """Review staged changes and enter the commit message before publishing."""
+
+    def __init__(self, parent, root: str, files: List[str], diff: str, ahead: int, note: str = ""):
+        super().__init__(parent)
+        self.setWindowTitle("Publish Changes")
+        self.resize(820, 620)
+        layout = QtWidgets.QVBoxLayout(self)
+
+        if files:
+            head = f"<b>{len(files)} changed file(s)</b> in {root}:<br>" + "<br>".join(files)
+        else:
+            head = f"No new changes in {root}."
+        if ahead:
+            head += f"<br><br>{ahead} earlier local commit(s) will be published as well."
+        label = QtWidgets.QLabel(head)
+        label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+        label.setWordWrap(True)
+        layout.addWidget(label)
+
+        self.diff_view = QtWidgets.QPlainTextEdit(diff)
+        self.diff_view.setReadOnly(True)
+        self.diff_view.setLineWrapMode(QtWidgets.QPlainTextEdit.NoWrap)
+        self.diff_view.setFont(QtGui.QFontDatabase.systemFont(QtGui.QFontDatabase.FixedFont))
+        layout.addWidget(self.diff_view, 1)
+
+        form = QtWidgets.QFormLayout()
+        self.message_edit = QtWidgets.QLineEdit()
+        self.message_edit.setPlaceholderText("e.g. Add chiller panel to Components")
+        self.message_edit.setEnabled(bool(files))
+        form.addRow("What did you change?", self.message_edit)
+        layout.addLayout(form)
+
+        if note:
+            note_label = QtWidgets.QLabel(note)
+            note_label.setWordWrap(True)
+            layout.addWidget(note_label)
+
+        buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Cancel)
+        self.publish_button = buttons.addButton("Publish", QtWidgets.QDialogButtonBox.AcceptRole)
+        buttons.accepted.connect(self._accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        self._needs_message = bool(files)
+
+    def _accept(self) -> None:
+        if self._needs_message and not self.message().strip():
+            QtWidgets.QMessageBox.warning(self, "Publish", "Please describe the change in a few words.")
+            return
+        self.accept()
+
+    def message(self) -> str:
+        return self.message_edit.text()
 
 
 def confirm(parent, title: str, text: str) -> bool:
