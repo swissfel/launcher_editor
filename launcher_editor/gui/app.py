@@ -9,6 +9,7 @@ import sys
 from PyQt5 import QtWidgets
 
 from ..backends import LocalBackend
+from ..sources import default_checkout
 from .main_window import MainWindow
 
 
@@ -29,7 +30,19 @@ def main(argv=None) -> int:
     parser.add_argument(
         "configuration",
         nargs="?",
-        help="Root menu JSON file to open immediately (local path).",
+        help="Root menu JSON file to open immediately (local path; with --git, "
+        "relative to the repository).",
+    )
+    parser.add_argument(
+        "--git",
+        metavar="URL",
+        help="Clone (first time) or update this git repository and open it.",
+    )
+    parser.add_argument("--branch", default="", help="Branch to use with --git (default: the repository's default).")
+    parser.add_argument(
+        "--checkout",
+        metavar="DIR",
+        help="Local folder for the --git clone (default: ~/launcher-editor/<repository name>).",
     )
     parser.add_argument(
         "--read-only",
@@ -62,7 +75,10 @@ def main(argv=None) -> int:
     )
     window.show()
 
-    if args.configuration:
+    if args.git:
+        checkout = args.checkout or default_checkout(args.git)
+        window.open_git(args.git, args.branch, checkout, args.configuration)
+    elif args.configuration:
         path = os.path.abspath(args.configuration)
         window._switch_backend_and_open(LocalBackend(), path)
 

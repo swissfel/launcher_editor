@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import copy
+import os
 import shlex
 from typing import Optional
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 
-from .. import gitflow
+from .. import gitflow, sources
 from ..backends import Backend, BackendError, LocalBackend, RemoteConnectionInfo, SFTPBackend
 from ..model import DEFAULT_MAPPING, MappingFile, MenuDocument, slugify
+from ..sources import RecentList, Source
 from ..workspace import Workspace
 from . import icons
 from .dialogs import (
@@ -18,6 +20,7 @@ from .dialogs import (
     PasswordDialog,
     PublishDialog,
     RemoteConnectDialog,
+    GitOpenDialog,
     confirm,
     show_about,
 )
@@ -52,6 +55,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.os_name = "Linux"
 
         self.settings = QtCore.QSettings(ORG_NAME, APP_NAME)
+        self.recent = RecentList.from_json(self.settings.value("recent_sources", ""))
 
         self.tabs = QtWidgets.QTabWidget()
         self.tabs.setTabsClosable(True)
@@ -80,6 +84,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.act_open_remote = QtWidgets.QAction("Open &Remote Configuration (SSH)…", self)
         self.act_open_remote.setShortcut("Ctrl+Shift+O")
         self.act_open_remote.triggered.connect(self.open_remote_root)
+
+        self.act_open_git = QtWidgets.QAction("Open &Git Repository…", self)
+        self.act_open_git.setShortcut("Ctrl+Shift+G")
+        self.act_open_git.setToolTip("Clone (or update) a repository and edit it locally (Ctrl+Shift+G)")
+        self.act_open_git.triggered.connect(self.open_git_repository)
+
+        self.act_clear_recent = QtWidgets.QAction("Clear List", self)
+        self.act_clear_recent.triggered.connect(self._clear_recent)
 
         self.act_new_config = QtWidgets.QAction("&New Configuration…", self)
         self.act_new_config.setShortcut(QtGui.QKeySequence.New)
@@ -179,6 +191,9 @@ class MainWindow(QtWidgets.QMainWindow):
         m_file = self.menuBar().addMenu("&File")
         m_file.addAction(self.act_open_local)
         m_file.addAction(self.act_open_remote)
+        m_file.addAction(self.act_open_git)
+        self.m_recent = m_file.addMenu("Open &Recent")
+        self.m_recent.aboutToShow.connect(self._populate_recent)
         m_file.addAction(self.act_new_config)
         m_file.addSeparator()
         m_file.addAction(self.act_save)
@@ -229,6 +244,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.addToolBar(tb)
         tb.addAction(self.act_open_local)
         tb.addAction(self.act_open_remote)
+        tb.addAction(self.act_open_git)
         tb.addSeparator()
         self.act_save.setIcon(icons.action_icon("save"))
         tb.addAction(self.act_save)
@@ -337,7 +353,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not path:
             return
         self.settings.setValue("last_local_dir", path)
-        self._switch_backend_and_open(LocalBackend(), path)
+        self._switch_backend_and_open(LocalBackend(), path, Source("local", path=os.path.abspath(path)))
 
     def open_remote_root(self) -> None:
         default_host = self.settings.value("last_remote_host", "")
@@ -373,7 +389,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.settings.setValue("last_remote_host", values["host"])
         self.settings.setValue("last_remote_path", values["path"])
-        self._switch_backend_and_open(backend, path)
+        self._switch_backend_and_open(
+            backend, path, Source("ssh", host=values["host"], user=values["username"] or "", path=path)
+        )
 
     def _pick_remote_file(self, backend: Backend, directory: str) -> Optional[str]:
         try:
@@ -391,11 +409,11 @@ class MainWindow(QtWidgets.QMainWindow):
             return backend.join(directory, name)
         return None
 
-    def _switch_backend_and_open(self, backend: Backend, path: str) -> None:
+    def _switch_backend_and_open(self, backend: Backend, path: str, source: Optional[Source] = None) -> bool:
         if self.workspace is not None and self.backend is not None:
             if not self._confirm_and_close_all_tabs():
                 backend.close()
-                return
+                return False
             self.backend.close()
 
         self._stop_preview()
@@ -405,6 +423,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self._auto_load_mapping(backend, backend.dirname(path))
         self._open_path_in_tab(path)
         self._update_enabled_state()
+        ed = self.current_editor()
+        opened = ed is not None and ed.doc.path == path
+        if opened:
+            if source is None and isinstance(backend, LocalBackend):
+                source = Source("local", path=os.path.abspath(path))
+            if source is not None:
+                self.recent.add(source)
+                self._save_recent()
+        return opened
 
     def _auto_load_mapping(self, backend: Backend, directory: str) -> None:
         for name in MAPPING_CANDIDATE_NAMES:
@@ -843,3 +870,104 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_preview_error(self, error: QtCore.QProcess.ProcessError, program: str) -> None:
         if error == QtCore.QProcess.FailedToStart:
             QtWidgets.QMessageBox.warning(self, "Preview", f'Could not start "{program}". Is it installed and on PATH?')
+
+    # -- recent configurations ----------------------------------------------
+    def _save_recent(self) -> None:
+        self.settings.setValue("recent_sources", self.recent.to_json())
+
+    def _clear_recent(self) -> None:
+        self.recent.clear()
+        self._save_recent()
+
+    def _populate_recent(self) -> None:
+        self.m_recent.clear()
+        if not self.recent.entries:
+            empty = self.m_recent.addAction("(nothing opened yet)")
+            empty.setEnabled(False)
+        icons_by_kind = {"local": "Local", "ssh": "SSH", "git": "Git"}
+        for i, src in enumerate(self.recent.entries):
+            act = self.m_recent.addAction(f"&{i + 1:X}  [{icons_by_kind.get(src.kind, src.kind)}]  {src.label()}")
+            act.triggered.connect(lambda checked=False, s=src: self.open_recent(s))
+        self.m_recent.addSeparator()
+        self.m_recent.addAction(self.act_clear_recent)
+        self.act_clear_recent.setEnabled(bool(self.recent.entries))
+
+    def open_recent(self, src: Source) -> None:
+        if src.kind == "git":
+            self.open_git(src.url, src.branch, src.checkout, src.path)
+        elif src.kind == "ssh":
+            self._open_recent_ssh(src)
+        else:
+            if not os.path.exists(src.path):
+                if confirm(self, "Open Recent", f"{src.path} no longer exists. Remove it from the list?"):
+                    self.recent.remove(src)
+                    self._save_recent()
+                return
+            self._switch_backend_and_open(LocalBackend(), src.path, src)
+
+    def _open_recent_ssh(self, src: Source) -> None:
+        try:
+            backend = self._run_busy(
+                SFTPBackend, RemoteConnectionInfo(host=src.host, username=src.user or None)
+            )
+        except BackendError:
+            # Key/agent login didn't work: ask, prefilled.
+            dlg = RemoteConnectDialog(self, default_host=src.host, default_path=src.path, default_user=src.user)
+            if dlg.exec_() != QtWidgets.QDialog.Accepted:
+                return
+            values = dlg.values()
+            try:
+                backend = SFTPBackend(
+                    RemoteConnectionInfo(host=values["host"], username=values["username"], password=values["password"])
+                )
+            except BackendError as exc:
+                QtWidgets.QMessageBox.critical(self, "Connection Failed", str(exc))
+                return
+            src = Source("ssh", host=values["host"], user=values["username"] or "", path=values["path"])
+        self._switch_backend_and_open(backend, src.path, src)
+
+    # -- git repositories ---------------------------------------------------
+    def open_git_repository(self) -> None:
+        dlg = GitOpenDialog(self, self.recent.git_urls(), sources.default_checkout)
+        if dlg.exec_() != QtWidgets.QDialog.Accepted:
+            return
+        url, branch, checkout = dlg.values()
+        self.open_git(url, branch, checkout)
+
+    def open_git(self, url: str, branch: str, checkout: str, root: Optional[str] = None) -> bool:
+        """Clone or update ``url`` into ``checkout`` and open its root menu file."""
+        checkout = os.path.abspath(os.path.expanduser(checkout))
+        try:
+            message = self._run_busy(sources.clone_or_update, url, checkout, branch)
+        except sources.CheckoutError as exc:
+            QtWidgets.QMessageBox.critical(self, "Open Git Repository", str(exc))
+            return False
+        if message.startswith("Could not"):
+            QtWidgets.QMessageBox.warning(self, "Open Git Repository", message)
+        else:
+            self.status.showMessage(message, 6000)
+
+        if not root or not os.path.isfile(os.path.join(checkout, root)):
+            previous = self.recent.last_for_url(url)
+            if previous and previous.checkout == checkout and os.path.isfile(os.path.join(checkout, previous.path)):
+                root = previous.path
+            else:
+                root = self._pick_root_file(checkout)
+                if not root:
+                    return False
+        path = os.path.join(checkout, root)
+        return self._switch_backend_and_open(
+            LocalBackend(), path, Source("git", url=url, branch=branch, checkout=checkout, path=root)
+        )
+
+    def _pick_root_file(self, checkout: str) -> Optional[str]:
+        files = sources.menu_files(checkout)
+        if not files:
+            QtWidgets.QMessageBox.information(self, "Open Git Repository", f"No .json menu files found in {checkout}.")
+            return None
+        # Beamline launchers conventionally start at S_<Name>.json.
+        preferred = next((i for i, f in enumerate(files) if os.path.basename(f).startswith("S_")), 0)
+        name, ok = QtWidgets.QInputDialog.getItem(
+            self, "Choose the Root Menu", f"Menu files in {checkout}:", files, preferred, False
+        )
+        return name if ok and name else None

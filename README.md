@@ -85,6 +85,9 @@ Options:
 | `--read-only` | View only: saving, editing and publishing are disabled. Useful for looking at a deployed configuration. |
 | `--preview-command CMD` | What **Preview** runs; the root menu file is appended. Default `epics_launcher`. Use the same options your consoles use, e.g. `"epics_launcher --position 80 -120"`. |
 | `--publish-note TEXT` | Extra text shown in the Publish dialog and after publishing, e.g. how long the deploy takes. |
+| `--git URL` | Clone (first time) or update this repository and open it; the positional file is then relative to the repository, e.g. `launcher-editor --git git@host:group/repo.git S_Main.json`. |
+| `--branch NAME` | Branch for `--git` (default: the repository's default branch). |
+| `--checkout DIR` | Local folder for the `--git` clone (default `~/launcher-editor/<repository name>`). |
 
 If `launcher-editor` isn't found (`~/.local/bin` not on your `PATH`), use
 `python -m launcher_editor` with the same Python you installed it into.
@@ -150,6 +153,30 @@ by the next deploy anyway. So the workflow is: clone, edit, commit, push.
    JSON, so expect one large diff for that file.
 
 To throw away local edits instead: `git checkout .` in the clone.
+
+### Opening a git repository directly
+
+**File → Open Git Repository…** (Ctrl+Shift+G) does the cloning for you:
+enter the repository URL (and optionally a branch); the local folder is
+filled in as `~/launcher-editor/<repository name>` and can be changed.
+The first time, the repository is cloned there; each later time it is
+updated (fast-forward only; if that isn't possible, e.g. because of
+unpublished commits, your copy opens as it is). Then pick the root menu
+file (files named `S_*.json` are suggested first). From there it's the
+normal workflow: edit, **Preview**, **Publish…**.
+
+SSH URLs (`git@host:group/repo.git`) use your SSH key. https URLs only
+work with stored credentials, since the editor never asks for a password.
+
+### Recent configurations
+
+**File → Open Recent** lists the last configurations you opened, from all
+sources: local files, SSH (host, user and path; never a password) and git
+repositories (URL, branch, local folder and root file). Choosing an entry
+reopens it directly: a git entry is updated and its root file opened
+without any questions; an SSH entry first tries your SSH key and only
+shows the connection dialog (prefilled) if that fails. The list keeps the
+last 12 and is stored in the editor's settings (`~/.config/PSI/`).
 
 ### Viewing a remote configuration over SSH
 

@@ -243,7 +243,7 @@ class MenuSettingsDialog(QtWidgets.QDialog):
 class RemoteConnectDialog(QtWidgets.QDialog):
     """Collect SSH/SFTP connection details for remote editing."""
 
-    def __init__(self, parent=None, default_host: str = "", default_path: str = ""):
+    def __init__(self, parent=None, default_host: str = "", default_path: str = "", default_user: str = ""):
         super().__init__(parent)
         self.setWindowTitle("Open Remote Configuration (SSH)")
         self.setMinimumWidth(460)
@@ -252,7 +252,7 @@ class RemoteConnectDialog(QtWidgets.QDialog):
         self.host_edit = QtWidgets.QLineEdit(default_host)
         form.addRow("Host:", self.host_edit)
 
-        self.user_edit = QtWidgets.QLineEdit()
+        self.user_edit = QtWidgets.QLineEdit(default_user or "")
         self.user_edit.setPlaceholderText("(default: current user / SSH config)")
         form.addRow("Username:", self.user_edit)
 
@@ -286,6 +286,84 @@ class RemoteConnectDialog(QtWidgets.QDialog):
             "password": self.password_edit.text() or None,
             "path": self.path_edit.text().strip(),
         }
+
+
+class GitOpenDialog(QtWidgets.QDialog):
+    """Repository URL, optional branch, and the local folder to clone into."""
+
+    def __init__(self, parent, known_urls: List[str], default_checkout, initial_url: str = ""):
+        super().__init__(parent)
+        self.setWindowTitle("Open Git Repository")
+        self.setMinimumWidth(560)
+        self._default_checkout = default_checkout
+        self._folder_edited = False
+        form = QtWidgets.QFormLayout(self)
+
+        self.url_combo = QtWidgets.QComboBox()
+        self.url_combo.setEditable(True)
+        self.url_combo.addItems(known_urls)
+        self.url_combo.setCurrentText(initial_url or (known_urls[0] if known_urls else ""))
+        self.url_combo.lineEdit().setPlaceholderText("git@host:group/repo.git  or  https://host/group/repo.git")
+        form.addRow("Repository URL:", self.url_combo)
+
+        self.branch_edit = QtWidgets.QLineEdit()
+        self.branch_edit.setPlaceholderText("(default branch)")
+        form.addRow("Branch:", self.branch_edit)
+
+        folder_row = QtWidgets.QHBoxLayout()
+        self.folder_edit = QtWidgets.QLineEdit()
+        self.folder_edit.textEdited.connect(self._mark_folder_edited)
+        browse = QtWidgets.QPushButton("Browse…")
+        browse.clicked.connect(self._browse)
+        folder_row.addWidget(self.folder_edit, 1)
+        folder_row.addWidget(browse)
+        form.addRow("Local folder:", folder_row)
+
+        note = QtWidgets.QLabel(
+            "The repository is cloned into the local folder the first time and "
+            "updated (fast-forward) each time you open it. You edit the local copy; "
+            "Git → Publish… pushes your changes back. SSH URLs use your SSH key; "
+            "https URLs need stored credentials (the editor never asks for a password)."
+        )
+        note.setWordWrap(True)
+        note.setStyleSheet("color: #6b7280; font-size: 11px;")
+        form.addRow(note)
+
+        buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Cancel)
+        buttons.addButton("Open", QtWidgets.QDialogButtonBox.AcceptRole)
+        buttons.accepted.connect(self._accept)
+        buttons.rejected.connect(self.reject)
+        form.addRow(buttons)
+
+        self.url_combo.currentTextChanged.connect(self._url_changed)
+        self._url_changed(self.url_combo.currentText())
+
+    def _mark_folder_edited(self, _text: str) -> None:
+        self._folder_edited = True
+
+    def _url_changed(self, url: str) -> None:
+        if not self._folder_edited:
+            self.folder_edit.setText(self._default_checkout(url.strip()) if url.strip() else "")
+
+    def _browse(self) -> None:
+        start = self.folder_edit.text() or ""
+        directory = QtWidgets.QFileDialog.getExistingDirectory(self, "Local Folder for the Clone", start)
+        if directory:
+            self.folder_edit.setText(directory)
+            self._folder_edited = True
+
+    def _accept(self) -> None:
+        if not self.url_combo.currentText().strip() or not self.folder_edit.text().strip():
+            QtWidgets.QMessageBox.warning(self, "Open Git Repository", "Please enter a repository URL and a local folder.")
+            return
+        self.accept()
+
+    def values(self) -> Tuple[str, str, str]:
+        return (
+            self.url_combo.currentText().strip(),
+            self.branch_edit.text().strip(),
+            self.folder_edit.text().strip(),
+        )
 
 
 class NewCustomTypeDialog(QtWidgets.QDialog):
