@@ -345,6 +345,43 @@ access a `git push` from a terminal would:
 
 To check before editing: `git -C <your clone> push --dry-run`.
 
+At PSI, see [PSI: gitea and autodeploy](#psi-gitea-and-autodeploy) for
+where these repositories live and how to get access.
+
+
+## PSI: gitea and autodeploy
+
+At PSI the launcher configuration of each area lives in a repository on
+**gitea.psi.ch** in the `autodeploy_config` group, named like
+`autodeploy_config/sf_<area>_launcher` (e.g. `sf_bernina_launcher`). An
+autodeploy workflow in each repository copies `master` to the area's
+`/sf/<area>/config/launcher` on every push. So:
+
+- **Publishing is deploying.** A push to `master` reaches every console
+  within about a minute; a launcher that is already open shows it after a
+  restart. Use **Preview** before publishing.
+- **Don't edit `/sf/<area>/config/launcher` directly.** It is read-only,
+  and the next deploy would overwrite it anyway. Edit a clone (e.g. with
+  **Open Git Configuration…** and the repository's `git@gitea.psi.ch:...`
+  URL) and publish from there.
+
+To publish you need, once:
+
+1. **A gitea.psi.ch account.** Log in at https://gitea.psi.ch once with
+   PSI SSO; that creates it.
+2. **Your SSH key in gitea:** gitea.psi.ch → Settings → SSH/GPG Keys →
+   Add Key, with the contents of your public key (e.g.
+   `~/.ssh/id_ed25519.pub`; create one with `ssh-keygen -t ed25519` if you
+   have none). Check with `ssh -T git@gitea.psi.ch`, which should greet
+   you by name.
+3. **Write access to the repository.** Ask one of its maintainers
+   (shown on the repository page in gitea) to add you as a collaborator
+   with Write permission, or to add you to a team that has it.
+
+Without step 3 you can still open the repository (if you can read it),
+edit and preview; only Publish fails, with git's "permission denied".
+https cloning of these repositories needs credentials, so use the SSH
+URL.
 
 ## How this relates to `epics_launcher`
 
