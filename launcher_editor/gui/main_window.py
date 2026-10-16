@@ -85,7 +85,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.act_open_remote.setShortcut("Ctrl+Shift+O")
         self.act_open_remote.triggered.connect(self.open_remote_root)
 
-        self.act_open_git = QtWidgets.QAction("Open &Git Repository…", self)
+        self.act_open_git = QtWidgets.QAction("Open &Git Configuration…", self)
         self.act_open_git.setShortcut("Ctrl+Shift+G")
         self.act_open_git.setToolTip("Clone (or update) a repository and edit it locally (Ctrl+Shift+G)")
         self.act_open_git.triggered.connect(self.open_git_repository)
@@ -189,9 +189,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _build_menus(self) -> None:
         m_file = self.menuBar().addMenu("&File")
+        m_file.addAction(self.act_open_git)
         m_file.addAction(self.act_open_local)
         m_file.addAction(self.act_open_remote)
-        m_file.addAction(self.act_open_git)
         self.m_recent = m_file.addMenu("Open &Recent")
         self.m_recent.aboutToShow.connect(self._populate_recent)
         m_file.addAction(self.act_new_config)
@@ -242,9 +242,9 @@ class MainWindow(QtWidgets.QMainWindow):
         tb.setMovable(False)
         tb.setIconSize(QtCore.QSize(20, 20))
         self.addToolBar(tb)
+        tb.addAction(self.act_open_git)
         tb.addAction(self.act_open_local)
         tb.addAction(self.act_open_remote)
-        tb.addAction(self.act_open_git)
         tb.addSeparator()
         self.act_save.setIcon(icons.action_icon("save"))
         tb.addAction(self.act_save)

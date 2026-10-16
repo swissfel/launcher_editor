@@ -293,7 +293,7 @@ class GitOpenDialog(QtWidgets.QDialog):
 
     def __init__(self, parent, known_urls: List[str], default_checkout, initial_url: str = ""):
         super().__init__(parent)
-        self.setWindowTitle("Open Git Repository")
+        self.setWindowTitle("Open Git Configuration")
         self.setMinimumWidth(560)
         self._default_checkout = default_checkout
         self._folder_edited = False

@@ -156,7 +156,7 @@ To throw away local edits instead: `git checkout .` in the clone.
 
 ### Opening a git repository directly
 
-**File → Open Git Repository…** (Ctrl+Shift+G) does the cloning for you:
+**File → Open Git Configuration…** (Ctrl+Shift+G, first button on the toolbar) does the cloning for you:
 enter the repository URL (and optionally a branch); the local folder is
 filled in as `~/launcher-editor/<repository name>` and can be changed.
 The first time, the repository is cloned there; each later time it is
