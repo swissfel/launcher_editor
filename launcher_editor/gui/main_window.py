@@ -592,9 +592,17 @@ class MainWindow(QtWidgets.QMainWindow):
         return True
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
+        # Commit a field that is still being edited, so the unsaved-changes
+        # check below sees it.
+        focused = QtWidgets.QApplication.focusWidget()
+        if focused is not None:
+            focused.clearFocus()
+        editors = [self.tabs.widget(i) for i in range(self.tabs.count())]
         if not self._confirm_and_close_all_tabs():
             event.ignore()
             return
+        for ed in editors:
+            ed.properties.shutdown()
         self._stop_preview()
         if self.backend is not None:
             self.backend.close()

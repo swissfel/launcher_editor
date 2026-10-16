@@ -93,6 +93,12 @@ class PropertiesPanel(QtWidgets.QWidget):
 
         self._rebuild_form(item)
 
+    def shutdown(self) -> None:
+        """Stop reacting to the fields (window is closing)."""
+        for editor in self._editors.values():
+            editor.blockSignals(True)
+        self._row = None
+
     def refresh_heading(self) -> None:
         if self._item is not None:
             type_name = self._item.get("type", "")
@@ -100,8 +106,18 @@ class PropertiesPanel(QtWidgets.QWidget):
 
     # -- form construction ----------------------------------------------
     def _rebuild_form(self, item: Dict[str, Any]) -> None:
+        # The form can be rebuilt while one of its fields is still emitting
+        # (e.g. editingFinished on focus-out). Deleting that field right away
+        # crashes Qt, so silence the old widgets and delete them later.
+        for editor in self._editors.values():
+            editor.blockSignals(True)
         while self.form.rowCount():
-            self.form.removeRow(0)
+            taken = self.form.takeRow(0)
+            for layout_item in (taken.labelItem, taken.fieldItem):
+                widget = layout_item.widget() if layout_item is not None else None
+                if widget is not None:
+                    widget.hide()
+                    widget.deleteLater()
         self._editors.clear()
 
         type_name = item.get("type", "")
@@ -149,7 +165,7 @@ class PropertiesPanel(QtWidgets.QWidget):
         else:
             editor = QtWidgets.QLineEdit(value or "")
             editor.editingFinished.connect(
-                lambda fn=field_name, ed=editor: self._commit(fn, ed.text())
+                lambda fn=field_name, ed=editor: self._commit_line(fn, ed)
             )
             row_widget = editor
 
@@ -176,5 +192,14 @@ class PropertiesPanel(QtWidgets.QWidget):
             self._item["text"] = value
             self.refresh_heading()
 
+    def _is_current(self, field_name: str, editor: QtWidgets.QWidget) -> bool:
+        """False for a late signal from a field of a previous form."""
+        return self._editors.get(field_name) is editor
+
+    def _commit_line(self, field_name: str, editor: QtWidgets.QLineEdit) -> None:
+        if self._is_current(field_name, editor):
+            self._commit(field_name, editor.text())
+
     def _commit_plain(self, field_name: str, editor: QtWidgets.QPlainTextEdit) -> None:
-        self._commit(field_name, editor.toPlainText())
+        if self._is_current(field_name, editor):
+            self._commit(field_name, editor.toPlainText())

@@ -47,7 +47,13 @@ class ItemListWidget(QtWidgets.QListWidget):
             self.setCurrentRow(keep_row)
 
     def _append_widget_item(self, item: Dict[str, Any]) -> QtWidgets.QListWidgetItem:
-        w_item = QtWidgets.QListWidgetItem(item_label(item))
+        w_item = QtWidgets.QListWidgetItem()
+        self._style_widget_item(w_item, item)
+        self.addItem(w_item)
+        return w_item
+
+    def _style_widget_item(self, w_item: QtWidgets.QListWidgetItem, item: Dict[str, Any]) -> None:
+        w_item.setText(item_label(item))
         type_name = item.get("type", "")
         w_item.setIcon(icons.type_icon(type_name))
         w_item.setData(ROLE_ITEM, item)
@@ -56,14 +62,27 @@ class ItemListWidget(QtWidgets.QListWidget):
             flags |= QtCore.Qt.ItemIsEditable
         w_item.setFlags(flags | QtCore.Qt.ItemIsDropEnabled)
         problems = validate_item(item)
-        if problems:
-            w_item.setForeground(QtGui.QColor("#b3261e"))
-            w_item.setToolTip("\n".join(problems))
-            font = w_item.font()
-            font.setItalic(True)
-            w_item.setFont(font)
-        self.addItem(w_item)
-        return w_item
+        font = w_item.font()
+        font.setItalic(bool(problems))
+        w_item.setFont(font)
+        w_item.setToolTip("\n".join(problems))
+        w_item.setForeground(QtGui.QColor("#b3261e") if problems else self.palette().text().color())
+
+    def update_row(self, row: int, item: Dict[str, Any]) -> None:
+        """Refresh one row's label/icon in place.
+
+        Unlike ``refresh`` this deletes nothing and doesn't touch the
+        selection, so it is safe to call from inside a signal handler of the
+        properties form or of the row being renamed.
+        """
+        w_item = self.item(row)
+        if w_item is None:
+            return
+        self._updating = True
+        try:
+            self._style_widget_item(w_item, item)
+        finally:
+            self._updating = False
 
     def item_dict(self, row: int) -> Optional[Dict[str, Any]]:
         w_item = self.item(row)

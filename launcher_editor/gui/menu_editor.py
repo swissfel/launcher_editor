@@ -152,7 +152,7 @@ class MenuEditorWidget(QtWidgets.QWidget):
     def _on_item_renamed(self, row: int, new_text: str) -> None:
         if 0 <= row < len(self.doc.items):
             self.doc.set_item_text(row, new_text)
-            self.list.refresh(self.doc.items, keep_row=row)
+            self.list.update_row(row, self.doc.items[row])
             if self._current_row() == row:
                 self.properties.set_item(row, self.doc.items[row])
             self.titleChanged.emit()
@@ -161,8 +161,9 @@ class MenuEditorWidget(QtWidgets.QWidget):
         if not (0 <= row < len(self.doc.items)):
             return
         self.doc.update_item(row, **{field: value})
-        if field == "text":
-            self.list.refresh(self.doc.items, keep_row=row)
+        # In place: a full list refresh would re-select the row and rebuild the
+        # properties form, deleting the field that is still emitting this signal.
+        self.list.update_row(row, self.doc.items[row])
         self.titleChanged.emit()
 
     def _on_items_reordered(self, new_order) -> None:
