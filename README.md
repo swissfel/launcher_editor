@@ -100,6 +100,22 @@ cd launcher_editor
 pip install -e ".[dev]"
 ```
 
+### Running from a checkout (no install)
+
+Nothing needs to be installed if a Python with PyQt5 is available (plus
+paramiko for SSH access). Point `PYTHONPATH` at a clone and run the
+package:
+
+```bash
+git clone https://github.com/swissfel/launcher_editor /path/to/launcher_editor
+PYTHONPATH=/path/to/launcher_editor python -B -m launcher_editor [options] [menu.json]
+```
+
+This is a good fit for a shared installation: one checkout that several
+users run through a small wrapper script, updated with
+`git -C /path/to/launcher_editor pull`. `-B` keeps Python from writing
+`__pycache__` into the shared checkout.
+
 ## Getting started: change your beamline's launcher
 
 The launcher configuration on the consoles (e.g. `/sf/bernina/config/launcher`)
@@ -313,6 +329,22 @@ single steps **Status**, **Commit…** and **Push…**. Nothing happens
 automatically; each is an explicit action. Git never prompts for a
 password here: if your SSH key or credentials aren't available, the step
 fails with git's message instead of hanging.
+
+### What publishing needs
+
+Publish and Update run plain `git` in your clone, so they need the same
+access a `git push` from a terminal would:
+
+- **Write access** to the repository on its server (e.g. as a
+  collaborator or through a team).
+- **Credentials that work without a prompt.** For SSH URLs
+  (`git@host:...`): a key registered with your account on the server, and
+  available to `ssh` (an unencrypted key, or loaded in an agent). Check it
+  with `ssh -T git@<host>`. For https URLs: a stored credential (credential
+  helper or token).
+
+To check before editing: `git -C <your clone> push --dry-run`.
+
 
 ## How this relates to `epics_launcher`
 
